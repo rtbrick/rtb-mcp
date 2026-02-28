@@ -156,18 +156,29 @@ The server works with no config file. If you want to customise the list of tech-
 
 ```json
 {
-  "name": "RTBrick Technical Documentation",
-  "base_url": "https://documents.rtbrick.com/techdocs/current/",
+"name": "rtbrick-website",
+  "description": "RTBrick website content crawled from https://documents.rtbrick.com",
+  "base_url": "https://documents.rtbrick.com",
   "doc_paths": [
+    "index-1.html",
     "index.html",
-    "bgpug/bgp_intro.html",
-    "isisug/isis_intro.html",
-    "ospf/ospf_intro.html"
-  ],
-  "cache_ttl_seconds": 3600,
-  "request_timeout": 30,
-  "max_retries": 3,
-  "log_level": "INFO"
+    "techdocs/25.4.1.2/cgnat-appliance/cgnat_appliance_config_cmds.html",
+    "techdocs/25.4.1.2/ctrld/02_switch_mgmt_rbfs_api_fundamentals.html",
+    "techdocs/25.4.1.2/index.html",
+    "techdocs/25.4.1.2/l2vpn/l2vpn_intro.html",
+    "techdocs/25.4.1.2/l2xug/l2x_config.html",
+    "techdocs/25.4.1.2/ngaccess/access_config_l2tp_pool.html",
+    "techdocs/25.4.1.2/ntpug/ntp_intro.html",
+    "techdocs/25.4.1.2/ntpug/ntp_operation_cmds.html",
+    "techdocs/25.4.1.2/platform/rbfs_ufispace_s9510_28dc.html",
+    "techdocs/25.4.1.2/policyug/policy_operations.html",
+    "techdocs/25.4.1.2/radiusservices/radius_control.html",
+    "techdocs/25.4.1.2/refdesign-cgnat/cbng_cgnat_refdesign_overview.html",
+    "techdocs/25.4.1.2/refdesign-ha/cbngipoe-rd-config.html",
+    "techdocs/25.4.1.2/refdesign/cbngipoe_refdesign_config_protocols.html",
+    "techdocs/25.4.1.2/ribug/rib-operational-commands.html",
+    "techdocs/25.4.1.2/routeleak/routeleak_config.html",
+    "techdocs/25.4.1.2/tsdb/tsdb_intro.html",
 }
 ```
 
