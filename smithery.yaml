@@ -1,0 +1,44 @@
+# Smithery.ai MCP Server Registry manifest
+# https://smithery.ai
+#
+# This file tells Smithery how to start the RTBrick MCP Server.
+
+startCommand:
+  type: stdio
+
+  # JSON Schema describing optional user-facing configuration.
+  # All fields are optional — the server runs with sensible defaults.
+  configSchema:
+    type: object
+    properties:
+      config_path:
+        type: string
+        title: Config File Path
+        description: >
+          Absolute path to a custom config.json file. If omitted the server
+          uses built-in defaults covering 23 RTBrick tech-doc pages.
+      log_level:
+        type: string
+        title: Log Level
+        description: Logging verbosity sent to stderr (DEBUG, INFO, WARNING, ERROR).
+        enum: [DEBUG, INFO, WARNING, ERROR]
+        default: INFO
+    required: []
+    additionalProperties: false
+
+  # Function that returns the stdio command to launch the server.
+  commandFunction: |-
+    (config) => {
+      const env = {};
+      if (config.config_path) {
+        env["CONFIG_PATH"] = config.config_path;
+      }
+      if (config.log_level) {
+        env["LOG_LEVEL"] = config.log_level;
+      }
+      return {
+        command: "python3",
+        args: ["mcpserver_opt_1.py"],
+        env
+      };
+    }
