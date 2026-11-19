@@ -1,6 +1,7 @@
 import time
 
 import pytest
+import requests
 
 from rtbrick_mcp_server.site import DiskCache, FetchError, HttpFetcher, validate_url
 
@@ -99,6 +100,17 @@ def test_rejects_oversized_and_binary_responses():
     })
     with pytest.raises(FetchError, match="Unsupported content type"):
         fetcher.get("https://www.rtbrick.com/f.pdf")
+
+
+def test_body_read_failures_become_fetch_errors():
+    class BrokenBody(FakeResponse):
+        def iter_content(self, chunk_size):
+            yield b"<html>partial"
+            raise requests.exceptions.ChunkedEncodingError("connection reset mid-body")
+
+    fetcher, _ = _fetcher({"https://www.rtbrick.com/x": BrokenBody()})
+    with pytest.raises(FetchError, match="Reading https://www.rtbrick.com/x failed"):
+        fetcher.get("https://www.rtbrick.com/x")
 
 
 def test_http_errors_are_reported():

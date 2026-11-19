@@ -21,9 +21,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, TypeVar
 
-from .extract import Page, extract_page
+from .extract import Page, to_page
 from .search import Hit, SearchIndex
 from .site import DOCS_ROOT, DiskCache, FetchError, HttpFetcher, validate_url
 
@@ -32,6 +32,9 @@ log = logging.getLogger("rtbrick_mcp")
 SOURCES = {"techdocs": "Technical Documentation", "trainings": "Training"}
 CURRENT_SEGMENT = "current"
 PINNED_TTL = 30 * 24 * 3600  # numbered versions don't change once published
+PARTIAL_INDEX_TTL = 5 * 60  # retry pages that failed to load after this long
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class Catalog:
 class SearchResult:
     hits: List[Hit]
     searched: List[DocVersion]
+    skipped: List[str] = field(default_factory=list)  # sources that could not be searched
 
 
 def version_key(name: str) -> Optional[Tuple[int, ...]]:
@@ -73,7 +77,10 @@ def version_key(name: str) -> Optional[Tuple[int, ...]]:
 
 def parse_sitemap(xml_text: str, source: str) -> Dict[str, List[str]]:
     """Map each version segment to the HTML pages the sitemap lists for it."""
-    root = ET.fromstring(xml_text.encode("utf-8"))
+    try:
+        root = ET.fromstring(xml_text.encode("utf-8"))
+    except ET.ParseError as exc:
+        raise FetchError(f"The {source} sitemap is not valid XML: {exc}") from exc
     prefix = f"{DOCS_ROOT}{source}/"
     pages: Dict[str, set] = defaultdict(set)
     for el in root.iter():
@@ -146,7 +153,7 @@ class DocsLibrary:
         self.workers = max(1, workers)
         self._lock = threading.Lock()
         self._catalogs: Dict[str, Catalog] = {}
-        self._indexes: Dict[DocVersion, Tuple[float, SearchIndex]] = {}
+        self._indexes: Dict[DocVersion, Tuple[float, SearchIndex]] = {}  # (expires_at, index)
         self._index_locks: Dict[DocVersion, threading.Lock] = {}
 
     @classmethod
@@ -169,21 +176,36 @@ class DocsLibrary:
 
     # -- fetching --------------------------------------------------------------
 
-    def _fetch_text(self, url: str, max_age: float) -> str:
+    def _fetch_parsed(self, url: str, max_age: float, parse: Callable[[str], T]) -> T:
+        """Fetch and parse a text resource; only bodies that parse are cached.
+
+        parse() raises FetchError for content that isn't what we expect (a maintenance
+        page instead of a sitemap, say). Such a body is never cached, and the last good
+        cached copy is used instead when there is one.
+        """
         key = f"text:{url}"
         cached = self.cache.get(key, max_age)
         if cached is not None:
-            return cached
+            try:
+                return parse(cached)
+            except FetchError:
+                pass  # unusable cached copy: fetch again
         try:
             text = self.fetcher.get(url)
+            result = parse(text)
         except FetchError:
             stale = self.cache.get(key, None)
-            if stale is None:
-                raise
-            log.warning("Using stale cached copy of %s", url)
-            return stale
+            if stale is not None:
+                try:
+                    result = parse(stale)
+                except FetchError:
+                    pass
+                else:
+                    log.warning("Using stale cached copy of %s", url)
+                    return result
+            raise
         self.cache.put(key, text)
-        return text
+        return result
 
     def get_page_by_url(self, url: str, max_age: Optional[float] = None) -> Page:
         url = validate_url(url)
@@ -201,7 +223,7 @@ class DocsLibrary:
                 raise
             log.warning("Using stale cached copy of %s", url)
             return Page.from_dict(stale)
-        page = extract_page(html, url)
+        page = to_page(html, url)
         self.cache.put(key, page.to_dict())
         return page
 
@@ -214,17 +236,29 @@ class DocsLibrary:
             cat = self._catalogs.get(source)
             if cat is not None and time.time() - cat.loaded_at < self.ttl_seconds:
                 return cat
-        sitemap = self._fetch_text(f"{DOCS_ROOT}sitemap-{source}.xml", self.ttl_seconds)
-        pages = parse_sitemap(sitemap, source)
-        if not pages:
-            raise FetchError(f"The {source} sitemap lists no pages.")
+        def sitemap_pages(text: str) -> Dict[str, List[str]]:
+            found = parse_sitemap(text, source)
+            if not found:
+                raise FetchError(f"The {source} sitemap lists no pages.")
+            return found
+
+        def current_version(text: str) -> str:
+            name = parse_current_version(text, source)
+            if name is None:
+                raise FetchError(f"The current {source} index page has no version marker.")
+            return name
+
+        pages = self._fetch_parsed(
+            f"{DOCS_ROOT}sitemap-{source}.xml", self.ttl_seconds, sitemap_pages
+        )
         current_name = CURRENT_SEGMENT
         if CURRENT_SEGMENT in pages:
             try:
-                index = self._fetch_text(
-                    f"{DOCS_ROOT}{source}/{CURRENT_SEGMENT}/index.html", self.ttl_seconds
+                current_name = self._fetch_parsed(
+                    f"{DOCS_ROOT}{source}/{CURRENT_SEGMENT}/index.html",
+                    self.ttl_seconds,
+                    current_version,
                 )
-                current_name = parse_current_version(index, source) or CURRENT_SEGMENT
             except FetchError as exc:
                 log.warning("Could not read the current %s version: %s", source, exc)
         versions = select_versions(source, pages, current_name, self.max_versions)
@@ -270,7 +304,7 @@ class DocsLibrary:
             lock = self._index_locks.setdefault(version, threading.Lock())
         with lock:
             entry = self._indexes.get(version)
-            if entry and time.time() - entry[0] < self._max_age(version):
+            if entry and time.time() < entry[0]:
                 return entry[1]
             paths = self.pages(version)
             started = time.time()
@@ -293,7 +327,10 @@ class DocsLibrary:
                 version.source, version.label, len(paths) - failures, len(idx),
                 failures, time.time() - started,
             )
-            self._indexes[version] = (time.time(), idx)
+            # A partial index is rebuilt soon so the missing pages get another chance;
+            # pages that did load come from the disk cache on the rebuild.
+            lifetime = PARTIAL_INDEX_TTL if failures else self._max_age(version)
+            self._indexes[version] = (time.time() + lifetime, idx)
             return idx
 
     def search(
@@ -303,21 +340,44 @@ class DocsLibrary:
         version: Optional[str] = None,
         limit: int = 8,
     ) -> SearchResult:
+        """Search each requested source and version, skipping any that can't be loaded.
+
+        An invalid version is the caller's mistake and raises ValueError. A source that
+        can't be fetched is skipped and reported in SearchResult.skipped; FetchError is
+        raised only when nothing could be searched.
+        """
         if source not in ("all", *SOURCES):
             raise ValueError(f"Unknown source {source!r}. Use all, {', '.join(SOURCES)}.")
         targets: List[DocVersion] = []
+        skipped: List[str] = []
         if source in ("all", "techdocs"):
-            if (version or "").strip().lower() == "all":
-                targets.extend(self.catalog("techdocs").versions)
-            else:
-                targets.append(self.resolve("techdocs", version))
+            try:
+                if (version or "").strip().lower() == "all":
+                    targets.extend(self.catalog("techdocs").versions)
+                else:
+                    targets.append(self.resolve("techdocs", version))
+            except FetchError as exc:
+                skipped.append(f"{SOURCES['techdocs']}: {exc}")
         if source in ("all", "trainings"):
-            targets.append(self.resolve("trainings", None))
+            try:
+                targets.append(self.resolve("trainings", None))
+            except FetchError as exc:
+                skipped.append(f"{SOURCES['trainings']}: {exc}")
+
         hits: List[Hit] = []
+        searched: List[DocVersion] = []
         for target in targets:
-            hits.extend(self.index(target).search(query, limit))
+            try:
+                idx = self.index(target)
+            except FetchError as exc:
+                skipped.append(f"{SOURCES[target.source]} {target.label}: {exc}")
+                continue
+            searched.append(target)
+            hits.extend(idx.search(query, limit))
+        if not searched:
+            raise FetchError("No documentation could be searched. " + " ".join(skipped))
         hits.sort(key=lambda h: -h.score)
-        return SearchResult(hits=hits[:limit], searched=targets)
+        return SearchResult(hits=hits[:limit], searched=searched, skipped=skipped)
 
     def start_prefetch(self) -> None:
         """Index the current tech docs and training material in the background."""

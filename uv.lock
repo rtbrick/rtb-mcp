@@ -1221,6 +1221,7 @@ source = { editable = "." }
 dependencies = [
     { name = "mcp" },
     { name = "requests" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -1235,6 +1236,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "urllib3", specifier = ">=1.26" },
 ]
 provides-extras = ["dev"]
 

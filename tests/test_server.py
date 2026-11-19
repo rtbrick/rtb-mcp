@@ -68,6 +68,24 @@ def test_list_doc_versions_and_pages():
     assert "evpn-vpws/: evpn_vpws_config.html" in text
 
 
+def test_unmatched_link_fragment_returns_whole_page_but_explicit_section_errors():
+    url = f"{DOCS_ROOT}techdocs/current/bgpug/bgp_intro.html"
+    text = call("get_doc_page", page=url + "#table-row-7")
+    assert "No section matches #table-row-7; showing the whole page." in text
+    assert "Route Reflection" in text and "Timers" in text
+    text = call("fetch_rtbrick_page", url="https://www.rtbrick.com/products#overview")
+    assert "Disaggregated BNG and routing." in text
+    with pytest.raises(Exception, match="No section matching 'nonexistent'"):
+        call("get_doc_page", page=url, section="nonexistent")
+
+
+def test_search_reports_skipped_sources(fetcher, library):
+    del fetcher.responses[f"{DOCS_ROOT}sitemap-trainings.xml"]
+    text = call("search_docs", query="route reflector")
+    assert "searched Technical Documentation 26.3.1 (current))" in text
+    assert "Note: could not search Training: HTTP 404" in text
+
+
 def test_errors_are_tool_errors():
     with pytest.raises(Exception, match="not allowed"):
         call("fetch_rtbrick_page", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")

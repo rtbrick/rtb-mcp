@@ -123,11 +123,16 @@ class HttpFetcher:
     def _read_capped(self, resp: requests.Response, url: str) -> bytes:
         chunks = []
         total = 0
-        for chunk in resp.iter_content(chunk_size=65536):
-            total += len(chunk)
-            if total > self.max_bytes:
-                raise FetchError(f"{url} is larger than the {self.max_bytes}-byte limit")
-            chunks.append(chunk)
+        try:
+            for chunk in resp.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > self.max_bytes:
+                    raise FetchError(f"{url} is larger than the {self.max_bytes}-byte limit")
+                chunks.append(chunk)
+        except requests.RequestException as exc:
+            # A body that stalls or breaks after the headers arrived (read timeout,
+            # truncated chunked encoding) must count as a failed fetch too.
+            raise FetchError(f"Reading {url} failed: {exc}") from exc
         return b"".join(chunks)
 
 

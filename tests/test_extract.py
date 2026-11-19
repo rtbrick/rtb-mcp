@@ -1,4 +1,4 @@
-from rtbrick_mcp_server.extract import Page, extract_page
+from rtbrick_mcp_server.extract import Page, extract_page, to_page
 
 from .conftest import antora_page, evpn_config
 
@@ -62,6 +62,23 @@ def test_section_url_and_round_trip():
     page = _page()
     assert page.section_url(page.sections[1]) == URL + "#configuration-hierarchy"
     assert Page.from_dict(page.to_dict()) == page
+
+
+def test_inline_code_keeps_spaces_around_nested_markup():
+    html = antora_page(
+        "techdocs", "26.3.1", "BGP",
+        "<p>Run <code>show bgp <em>peer</em> detail</code> or <code> show  bgp\n summary </code>.</p>",
+    )
+    text = extract_page(html, URL).to_markdown()
+    assert "Run `show bgp peer detail` or `show bgp summary`." in text
+
+
+def test_non_html_text_is_kept_verbatim():
+    body = '{\n  "name": "rbfs",\n  "note": "<p>not a tag</p>"\n}\n'
+    page = to_page(body, "https://www.rtbrick.com/x.json")
+    assert page.sections[0].text == body
+    html_page = to_page("<!DOCTYPE html><html><body><p>Hi</p></body></html>", "https://www.rtbrick.com/")
+    assert html_page.sections[0].text == "Hi"
 
 
 def test_pages_without_article_fall_back_to_body():

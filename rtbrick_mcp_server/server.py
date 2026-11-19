@@ -104,21 +104,32 @@ def _paginate(text: str, offset: int, max_chars: int) -> str:
     return chunk
 
 
-def _render_page(page: Page, version_label: Optional[str], section: Optional[str]) -> str:
+def _render_page(
+    page: Page,
+    version_label: Optional[str],
+    section: Optional[str],
+    from_fragment: bool = False,
+) -> str:
+    """Render a page, or one section of it.
+
+    An explicit section that doesn't exist is an error. A section taken from a link's
+    #fragment may point at a non-heading anchor, so then the whole page is returned.
+    """
     header = [f"Source: {page.url}"]
     if version_label:
         header.append(f"Version: {version_label}")
-    if section:
-        sections = page.section_slice(section)
-        if not sections:
-            names = [f"{s.heading} (#{s.anchor})" for s in page.sections if s.heading]
-            raise ToolError(
-                f"No section matching {section!r} on {page.url}. Sections: "
-                + "; ".join(names[:60])
-            )
+    sections = page.section_slice(section) if section else []
+    if section and not sections and not from_fragment:
+        names = [f"{s.heading} (#{s.anchor})" for s in page.sections if s.heading]
+        raise ToolError(
+            f"No section matching {section!r} on {page.url}. Sections: " + "; ".join(names[:60])
+        )
+    if sections:
         header[0] = f"Source: {page.section_url(sections[0])}"
         body = page.to_markdown(sections)
     else:
+        if section:
+            header.append(f"(No section matches #{section}; showing the whole page.)")
         body = page.to_markdown()
     return "\n".join(header) + "\n\n" + body
 
@@ -178,9 +189,10 @@ async def search_docs(
     lib = get_library()
     result = await _run(lambda: lib.search(query, source, version, max_results))
     searched = ", ".join(f"{SOURCES[v.source]} {v.label}" for v in result.searched)
+    notes = [f"Note: could not search {s}" for s in result.skipped]
     if not result.hits:
-        return f"No results for {query!r} (searched {searched})."
-    lines = [f"{len(result.hits)} results for {query!r} (searched {searched})", ""]
+        return "\n".join([f"No results for {query!r} (searched {searched}).", *notes])
+    lines = [f"{len(result.hits)} results for {query!r} (searched {searched})", *notes, ""]
     for i, hit in enumerate(result.hits, 1):
         title = f"{hit.page_title} › {hit.heading}" if hit.heading else hit.page_title
         lines.append(f"{i}. {title}")
@@ -217,22 +229,19 @@ async def get_doc_page(
 
     def load() -> str:
         target = page.strip()
-        wanted_section = section
         if target.startswith(("http://", "https://")):
-            parsed = urlparse(target)
-            if parsed.fragment and not wanted_section:
-                wanted_section = parsed.fragment
+            fragment = urlparse(target).fragment
             url = validate_url(target)
             label, max_age = _docs_url_version(lib, url)
             doc = lib.get_page_by_url(url, max_age)
         else:
             path, _, fragment = target.partition("#")
-            if fragment and not wanted_section:
-                wanted_section = fragment
             v = lib.resolve(source, _version_for(source, version))
             label = f"{SOURCES[v.source]} {v.label}"
             doc = lib.get_page(v, path)
-        return _render_page(doc, label, wanted_section)
+        if section:
+            return _render_page(doc, label, section)
+        return _render_page(doc, label, fragment or None, from_fragment=True)
 
     return _paginate(await _run(load), offset, max_chars)
 
@@ -312,7 +321,8 @@ async def fetch_rtbrick_page(
     def load() -> str:
         clean = validate_url(url)
         label, max_age = _docs_url_version(lib, clean)
-        return _render_page(lib.get_page_by_url(clean, max_age), label, urlparse(url).fragment or None)
+        fragment = urlparse(url).fragment or None
+        return _render_page(lib.get_page_by_url(clean, max_age), label, fragment, from_fragment=True)
 
     return _paginate(await _run(load), offset, max_chars)
 

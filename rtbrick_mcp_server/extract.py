@@ -86,7 +86,7 @@ class _Extractor(HTMLParser):
         self.pre_depth = 0
         self.cell_depth = 0
         self.cell_index = 0
-        self.inline_code = False
+        self.inline_code: Optional[List[str]] = None  # text of the open inline <code>
         self.in_title_tag = False
         self.html_title = ""
         self.page_title = ""
@@ -139,8 +139,7 @@ class _Extractor(HTMLParser):
             self.pre_depth += 1
             self._emit(_FENCE)
         elif tag == "code" and not self.pre_depth:
-            self.inline_code = True
-            self._emit("`")
+            self.inline_code = []
         elif tag in ("td", "th"):
             self._emit(" | " if self.cell_index else "")
             self.cell_index += 1
@@ -184,8 +183,7 @@ class _Extractor(HTMLParser):
             self.pre_depth = max(0, self.pre_depth - 1)
             self._emit(_FENCE)
         elif tag == "code" and not self.pre_depth:
-            self.inline_code = False
-            self._emit("`")
+            self._close_inline_code()
         elif tag in ("td", "th"):
             self.cell_depth = max(0, self.cell_depth - 1)
         elif tag in _BLOCK_TAGS and tag != "tr":
@@ -199,13 +197,23 @@ class _Extractor(HTMLParser):
             return
         if self.pre_depth:
             self._emit(data)
-        elif self.inline_code:
-            self._emit(data.strip())
+        elif self.inline_code is not None:
+            # Nested tags (<em>peer</em>) split the text; keep the spaces between parts.
+            self.inline_code.append(data)
         else:
             self._emit(re.sub(r"\s+", " ", data))
 
+    def _close_inline_code(self) -> None:
+        if self.inline_code is None:
+            return
+        code = re.sub(r"\s+", " ", "".join(self.inline_code)).strip()
+        self.inline_code = None
+        if code:
+            self._emit(f"`{code}`")
+
     def close(self) -> None:
         super().close()
+        self._close_inline_code()
         self._flush()
 
 
@@ -236,3 +244,15 @@ def extract_page(html: str, url: str) -> Page:
         parser = _parse(html, article_only=False)
     title = parser.page_title or parser.html_title.split(" :: ")[0].strip() or url
     return Page(url=url, title=title, sections=parser.sections)
+
+
+def looks_like_html(text: str) -> bool:
+    head = text[:4096].lstrip().lower()
+    return head.startswith("<!doctype html") or "<html" in head or "<body" in head
+
+
+def to_page(text: str, url: str) -> Page:
+    """Extract HTML; keep any other text (JSON, YAML, plain text) exactly as served."""
+    if looks_like_html(text):
+        return extract_page(text, url)
+    return Page(url=url, title=url, sections=[Section("", "", 1, text)])

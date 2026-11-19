@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from rtbrick_mcp_server.docs import (
@@ -109,6 +111,66 @@ def test_index_skips_pages_that_fail(fetcher):
     lib = DocsLibrary(fetcher, DiskCache(None), workers=2)  # type: ignore[arg-type]
     hits = lib.search("evpn", source="techdocs").hits
     assert hits and all("bgp_intro" not in h.url for h in hits)
+
+
+def test_search_skips_a_source_that_is_down(fetcher):
+    del fetcher.responses[f"{DOCS_ROOT}sitemap-trainings.xml"]
+    lib = DocsLibrary(fetcher, DiskCache(None), workers=2)  # type: ignore[arg-type]
+    result = lib.search("route reflector")
+    assert [v.source for v in result.searched] == ["techdocs"]
+    assert result.hits and all(h.source == "techdocs" for h in result.hits)
+    assert len(result.skipped) == 1 and result.skipped[0].startswith("Training: HTTP 404")
+
+
+def test_search_fails_only_when_nothing_can_be_searched():
+    lib = DocsLibrary(FakeFetcher({}), DiskCache(None))  # type: ignore[arg-type]
+    with pytest.raises(FetchError, match="No documentation could be searched"):
+        lib.search("bgp")
+
+
+def test_invalid_version_is_still_an_error_with_source_all(library):
+    with pytest.raises(ValueError, match="not available"):
+        library.search("bgp", version="24.1")
+
+
+def test_invalid_sitemap_is_not_cached_and_stale_copy_is_used(tmp_path, fetcher):
+    sitemap_url = f"{DOCS_ROOT}sitemap-techdocs.xml"
+    good = fetcher.responses[sitemap_url]
+
+    # No cached copy yet: a maintenance page is an error, and must not be cached.
+    fetcher.responses[sitemap_url] = "<html><body>Down for maintenance</body></html>"
+    lib = DocsLibrary(fetcher, DiskCache(tmp_path), workers=1)  # type: ignore[arg-type]
+    with pytest.raises(FetchError, match="not valid XML|lists no pages"):
+        lib.catalog("techdocs")
+    fetcher.responses[sitemap_url] = good
+    lib = DocsLibrary(fetcher, DiskCache(tmp_path), workers=1)  # type: ignore[arg-type]
+    assert lib.catalog("techdocs").versions[0].name == "26.3.1"
+
+    # With a good copy cached, a later bad response falls back to it.
+    fetcher.responses[sitemap_url] = "<?xml version='1.0'?><urlset></urlset>"
+    lib = DocsLibrary(fetcher, DiskCache(tmp_path), workers=1, ttl_seconds=0)  # type: ignore[arg-type]
+    assert lib.catalog("techdocs").versions[0].name == "26.3.1"
+
+
+def test_partial_index_is_retried_soon(fetcher, monkeypatch):
+    url = f"{DOCS_ROOT}techdocs/current/bgpug/bgp_intro.html"
+    page_html = fetcher.responses.pop(url)
+    lib = DocsLibrary(fetcher, DiskCache(None), workers=2)  # type: ignore[arg-type]
+    v = lib.resolve("techdocs", None)
+    assert not lib.index(v).search("reflector")
+
+    fetcher.responses[url] = page_html
+    assert not lib.index(v).search("reflector")  # still within the retry delay
+    later = time.time() + 6 * 60
+    monkeypatch.setattr(time, "time", lambda: later)
+    assert lib.index(v).search("reflector")[0].url == url + "#route-reflection"
+
+
+def test_non_html_pages_are_returned_verbatim(fetcher, library):
+    body = "name: rbfs\n  indent: kept\n"
+    fetcher.responses["https://www.rtbrick.com/files/notes.yaml"] = body
+    page = library.get_page_by_url("https://www.rtbrick.com/files/notes.yaml")
+    assert page.sections[0].text == body
 
 
 def test_unreachable_sitemap_is_an_error():

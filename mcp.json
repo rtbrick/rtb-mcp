@@ -40,7 +40,7 @@
     "entrypoint": "rtbrick_mcp_server",
     "command": "python3",
     "args": ["-m", "rtbrick_mcp_server"],
-    "dependencies": ["mcp>=2.3,<3", "requests>=2.31"]
+    "dependencies": ["mcp>=2.3,<3", "requests>=2.31", "urllib3>=1.26"]
   },
   "configuration": {
     "optional": true,
