@@ -166,6 +166,38 @@ def test_partial_index_is_retried_soon(fetcher, monkeypatch):
     assert lib.index(v).search("reflector")[0].url == url + "#route-reflection"
 
 
+def test_retry_fetches_only_failed_pages_and_backs_off(fetcher, monkeypatch):
+    broken = f"{DOCS_ROOT}techdocs/current/bgpug/bgp_intro.html"
+    page_html = fetcher.responses.pop(broken)
+    lib = DocsLibrary(fetcher, DiskCache(None), workers=2)  # type: ignore[arg-type]
+    v = lib.resolve("techdocs", None)
+    start = time.time()
+    clock = {"now": start}
+    monkeypatch.setattr(time, "time", lambda: clock["now"])
+
+    def fetched_pages():
+        return [u for u in fetcher.calls if "/techdocs/current/" in u and "index.html" not in u]
+
+    lib.index(v)
+    assert sorted(fetched_pages()) == sorted([broken, broken.replace("bgpug/bgp_intro", "evpn-vpws/evpn_vpws_config")])
+
+    # First retry after 5 minutes: only the failed page is fetched, and it fails again.
+    fetcher.calls.clear()
+    clock["now"] = start + 5 * 60 + 1
+    lib.index(v)
+    assert fetched_pages() == [broken]
+
+    # The next retry waits 10 minutes, not 5.
+    fetcher.calls.clear()
+    clock["now"] = start + 11 * 60
+    lib.index(v)
+    assert fetched_pages() == []
+    fetcher.responses[broken] = page_html
+    clock["now"] = start + 15 * 60 + 2
+    assert lib.index(v).search("reflector")[0].url == broken + "#route-reflection"
+    assert fetched_pages() == [broken]
+
+
 def test_non_html_pages_are_returned_verbatim(fetcher, library):
     body = "name: rbfs\n  indent: kept\n"
     fetcher.responses["https://www.rtbrick.com/files/notes.yaml"] = body

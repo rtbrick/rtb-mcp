@@ -32,7 +32,7 @@ log = logging.getLogger("rtbrick_mcp")
 SOURCES = {"techdocs": "Technical Documentation", "trainings": "Training"}
 CURRENT_SEGMENT = "current"
 PINNED_TTL = 30 * 24 * 3600  # numbered versions don't change once published
-PARTIAL_INDEX_TTL = 5 * 60  # retry pages that failed to load after this long
+PARTIAL_INDEX_TTL = 5 * 60  # first retry of pages that failed to load; doubles each time
 
 T = TypeVar("T")
 
@@ -59,6 +59,15 @@ class Catalog:
     versions: List[DocVersion]
     pages: Dict[str, List[str]]  # URL segment -> page paths relative to the version root
     loaded_at: float = field(default_factory=time.time)
+
+
+@dataclass
+class _IndexState:
+    index: SearchIndex
+    pages: Dict[str, Page]  # pages that loaded, by path
+    full_until: float  # after this every page is fetched again
+    retry_at: float  # after this only the missing pages are retried (== full_until if none)
+    retries: int = 0  # consecutive retries that still left pages missing
 
 
 @dataclass
@@ -153,7 +162,7 @@ class DocsLibrary:
         self.workers = max(1, workers)
         self._lock = threading.Lock()
         self._catalogs: Dict[str, Catalog] = {}
-        self._indexes: Dict[DocVersion, Tuple[float, SearchIndex]] = {}  # (expires_at, index)
+        self._indexes: Dict[DocVersion, _IndexState] = {}
         self._index_locks: Dict[DocVersion, threading.Lock] = {}
 
     @classmethod
@@ -303,34 +312,46 @@ class DocsLibrary:
         with self._lock:
             lock = self._index_locks.setdefault(version, threading.Lock())
         with lock:
-            entry = self._indexes.get(version)
-            if entry and time.time() < entry[0]:
-                return entry[1]
+            now = time.time()
+            state = self._indexes.get(version)
+            if state and now < state.retry_at:
+                return state.index
             paths = self.pages(version)
-            started = time.time()
-            idx = SearchIndex()
+            # Within the version's lifetime only the pages that failed are fetched again;
+            # the ones already loaded are kept in memory (the disk cache may be off).
+            keep = state is not None and now < state.full_until
+            loaded: Dict[str, Page] = dict(state.pages) if keep and state else {}
+            todo = [p for p in paths if p not in loaded]
             failures = 0
             with ThreadPoolExecutor(max_workers=self.workers) as pool:
-                futures = {pool.submit(self.get_page, version, p): p for p in paths}
+                futures = {pool.submit(self.get_page, version, p): p for p in todo}
                 for future in as_completed(futures):
+                    path = futures[future]
                     try:
-                        page = future.result()
+                        loaded[path] = future.result()
                     except (FetchError, ValueError) as exc:
                         failures += 1
-                        log.warning("Skipping %s: %s", futures[future], exc)
-                        continue
-                    idx.add_page(page, version.source, version.label)
-            if not len(idx):
+                        log.warning("Skipping %s: %s", path, exc)
+            loaded = {p: loaded[p] for p in paths if p in loaded}  # drop pages no longer listed
+            if not loaded:
                 raise FetchError(f"Could not load any {version.source} {version.label} pages.")
+
+            idx = SearchIndex()
+            for page in loaded.values():
+                idx.add_page(page, version.source, version.label)
+            full_until = state.full_until if keep and state else now + self._max_age(version)
+            if failures:
+                # Back off 5, 10, 20... minutes while pages keep failing.
+                retries = (state.retries if keep and state else 0) + 1
+                retry_at = min(full_until, now + PARTIAL_INDEX_TTL * 2 ** (retries - 1))
+            else:
+                retries, retry_at = 0, full_until
+            self._indexes[version] = _IndexState(idx, loaded, full_until, retry_at, retries)
             log.info(
-                "Indexed %s %s: %d pages, %d sections, %d failures in %.1fs",
-                version.source, version.label, len(paths) - failures, len(idx),
-                failures, time.time() - started,
+                "Indexed %s %s: fetched %d of %d pages, %d failed, %d sections in %.1fs",
+                version.source, version.label, len(todo) - failures, len(paths),
+                failures, len(idx), time.time() - now,
             )
-            # A partial index is rebuilt soon so the missing pages get another chance;
-            # pages that did load come from the disk cache on the rebuild.
-            lifetime = PARTIAL_INDEX_TTL if failures else self._max_age(version)
-            self._indexes[version] = (time.time() + lifetime, idx)
             return idx
 
     def search(
