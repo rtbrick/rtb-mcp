@@ -11,12 +11,12 @@ startCommand:
   configSchema:
     type: object
     properties:
-      config_path:
-        type: string
-        title: Config File Path
-        description: >
-          Absolute path to a custom config.json file. If omitted the server
-          uses built-in defaults covering 23 RTBrick tech-doc pages.
+      max_versions:
+        type: integer
+        title: Release lines
+        description: How many recent RBFS release lines to offer (newest patch of each).
+        minimum: 1
+        default: 5
       log_level:
         type: string
         title: Log Level
@@ -30,15 +30,15 @@ startCommand:
   commandFunction: |-
     (config) => {
       const env = {};
-      if (config.config_path) {
-        env["CONFIG_PATH"] = config.config_path;
+      if (config.max_versions) {
+        env["RTBRICK_MCP_MAX_VERSIONS"] = String(config.max_versions);
       }
       if (config.log_level) {
-        env["LOG_LEVEL"] = config.log_level;
+        env["RTBRICK_MCP_LOG_LEVEL"] = config.log_level;
       }
       return {
         command: "python3",
-        args: ["mcpserver_opt_1.py"],
+        args: ["-m", "rtbrick_mcp_server"],
         env
       };
     }

@@ -5,6 +5,46 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [3.0.0] — Unreleased
+
+Rewritten on the official MCP Python SDK 2.x (`MCPServer`, formerly FastMCP). Requires Python 3.10+.
+
+### Added
+- Training material (https://www.rtbrick.com/docs/trainings/current/index.html) alongside the tech docs
+- Version support: the newest patch of each of the 5 most recent RBFS release lines
+  (`RTBRICK_MCP_MAX_VERSIONS`), discovered automatically from the site's sitemaps
+- `search_docs` — BM25 search over page sections with per-word matching, so multi-word queries
+  no longer need to appear verbatim; results link straight to the section (`#anchor`)
+- `get_doc_page` — read a page or a single section, by link or path, for any available version,
+  paginated with `offset` / `max_chars`
+- `list_doc_versions` and `list_doc_pages`
+- On-disk page cache (`~/.cache/rtbrick-mcp`) and background indexing of the current docs at startup
+- Streamable HTTP transport (`--transport streamable-http`)
+- Test suite under `tests/` that runs offline
+
+### Changed
+- All ~320 pages per version are covered, discovered from the sitemaps, instead of a fixed list of 23
+- Docs are read from https://www.rtbrick.com/docs/ (documents.rtbrick.com now redirects there)
+- Only the page's article content is extracted; code blocks keep their indentation and tables
+  keep one row per line
+- `get_rtbrick_website`, `get_tech_docs_index`, `search_tech_docs` and `list_tech_docs` are
+  replaced by the tools above; `fetch_rtbrick_page` remains for the rest of www.rtbrick.com
+- `config.json` is replaced by environment variables (see README)
+
+### Fixed
+- Packaging: the build backend didn't exist and the `rtb-mcp` entry point pointed at a missing package
+- Protocol: `ping` is answered, tool failures are reported with `isError`, and protocol versions are
+  negotiated (all handled by the SDK)
+- Redirects are checked against the host allowlist at every hop; responses are capped at 10 MB
+
+### Removed
+- `get_rtbrick_videos` tool — returned metadata for a single video, not the playlist contents
+- `get_youtube_video_info` tool — accepted any YouTube video, not only RTBrick's
+- `www.youtube.com` and `youtube.com` from the domain allowlist
+- `mcpserver_opt_1.py` and the duplicate `test_mcpserver_*.py` files
+
+---
+
 ## [2.0.0] — 2026-02-27
 
 ### Added
