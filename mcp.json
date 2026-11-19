@@ -1,11 +1,11 @@
 {
   "$schema": "https://modelcontextprotocol.io/schemas/mcp-manifest.json",
   "name": "rtbrick-mcp-server",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "displayName": "RTBrick MCP Server",
-  "description": "Access RTBrick's website, RBFS technical documentation, and YouTube training videos directly from your AI assistant. No API key required.",
+  "description": "Search and read RTBrick RBFS technical documentation (recent release lines) and training modules from your AI assistant. No API key required.",
   "homepage": "https://www.rtbrick.com",
-  "repository": "https://github.com/rtbrick/rtbrick-mcp-server",
+  "repository": "https://github.com/rtbrick/rtb-mcp",
   "license": "MIT",
   "author": {
     "name": "Pravin Bhandarkar",
@@ -23,34 +23,47 @@
     "rbfs",
     "routing",
     "bgp",
+    "evpn",
     "isis",
     "ospf",
+    "bng",
     "telco",
     "networking",
-    "documentation",
-    "youtube"
+    "documentation"
   ],
   "transport": {
     "type": "stdio"
   },
   "runtime": {
     "language": "python",
-    "minVersion": "3.9",
-    "entrypoint": "mcpserver_opt_1.py",
+    "minVersion": "3.10",
+    "entrypoint": "rtbrick_mcp_server",
     "command": "python3",
-    "args": ["mcpserver_opt_1.py"],
-    "dependencies": ["requests>=2.28.0", "urllib3>=1.26.0"]
+    "args": ["-m", "rtbrick_mcp_server"],
+    "dependencies": ["mcp>=2.3,<3", "requests>=2.31"]
   },
   "configuration": {
     "optional": true,
     "environmentVariables": [
       {
-        "name": "CONFIG_PATH",
-        "description": "Absolute path to a custom config.json file. If unset, built-in defaults are used.",
+        "name": "RTBRICK_MCP_MAX_VERSIONS",
+        "description": "How many recent RBFS release lines to offer; the newest patch of each is used. Default: 5.",
+        "required": false,
+        "default": "5"
+      },
+      {
+        "name": "RTBRICK_MCP_CACHE_DIR",
+        "description": "Directory for cached pages, or 'off'. Default: ~/.cache/rtbrick-mcp.",
         "required": false
       },
       {
-        "name": "LOG_LEVEL",
+        "name": "RTBRICK_MCP_CACHE_TTL_HOURS",
+        "description": "How long cached pages of the current release stay fresh. Default: 24.",
+        "required": false,
+        "default": "24"
+      },
+      {
+        "name": "RTBRICK_MCP_LOG_LEVEL",
         "description": "Logging verbosity (DEBUG, INFO, WARNING, ERROR). Default: INFO.",
         "required": false,
         "default": "INFO"
@@ -59,32 +72,24 @@
   },
   "tools": [
     {
+      "name": "search_docs",
+      "description": "Search RBFS technical documentation and training modules; returns matching sections with direct links."
+    },
+    {
+      "name": "get_doc_page",
+      "description": "Read a documentation or training page, or a single section of it, for any available version."
+    },
+    {
+      "name": "list_doc_versions",
+      "description": "List the available tech-docs versions (newest patch of each recent release line) and the training version."
+    },
+    {
+      "name": "list_doc_pages",
+      "description": "List the pages of the tech docs or training material, grouped by guide."
+    },
+    {
       "name": "fetch_rtbrick_page",
-      "description": "Fetch the content of any page on an allowed RTBrick or YouTube domain (www.rtbrick.com, documents.rtbrick.com, www.youtube.com). Only https:// URLs are accepted."
-    },
-    {
-      "name": "get_rtbrick_website",
-      "description": "Fetch the RTBrick main website (https://www.rtbrick.com) and return its text content."
-    },
-    {
-      "name": "get_tech_docs_index",
-      "description": "Fetch the RTBrick technical documentation index at https://documents.rtbrick.com/techdocs/current/index.html."
-    },
-    {
-      "name": "search_tech_docs",
-      "description": "Keyword search across all configured RTBrick RBFS technical documentation pages. Returns relevance-ranked results with context snippets."
-    },
-    {
-      "name": "list_tech_docs",
-      "description": "List all 23 configured RTBrick technical documentation pages with their relative paths and full URLs."
-    },
-    {
-      "name": "get_rtbrick_videos",
-      "description": "Fetch metadata for RTBrick's YouTube training-video playlist using the YouTube oEmbed API. Returns title, channel, thumbnail, and playlist URL."
-    },
-    {
-      "name": "get_youtube_video_info",
-      "description": "Fetch oEmbed metadata (title, channel, thumbnail, dimensions) for a specific RTBrick YouTube video URL."
+      "description": "Read any page on www.rtbrick.com as text."
     }
   ],
   "resources": [
@@ -94,11 +99,11 @@
     },
     {
       "name": "RTBrick Technical Documentation",
-      "url": "https://documents.rtbrick.com/techdocs/current/index.html"
+      "url": "https://www.rtbrick.com/docs/techdocs/current/index.html"
     },
     {
-      "name": "RTBrick YouTube Channel",
-      "url": "https://www.youtube.com/@rtbrick7767"
+      "name": "RTBrick Training",
+      "url": "https://www.rtbrick.com/docs/trainings/current/index.html"
     }
   ]
 }

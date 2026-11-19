@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "rtbrick-mcp-server"
-version = "2.0.0"
-description = "MCP server for RTBrick website, technical documentation, and YouTube training videos"
+version = "3.0.0"
+description = "MCP server for RTBrick RBFS technical documentation and training material"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
@@ -27,13 +27,12 @@ keywords = [
     "llm",
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Telecommunications Industry",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -43,60 +42,41 @@ classifiers = [
     "Topic :: System :: Networking",
     "Topic :: Documentation",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-    "requests>=2.28.0",
-    "urllib3>=1.26.0",
+    "mcp>=2.3,<3",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0",
-    "types-requests",
+    "ruff>=0.4",
 ]
 
 [project.urls]
 Homepage      = "https://www.rtbrick.com"
-Documentation = "https://documents.rtbrick.com/techdocs/current/index.html"
-Repository    = "https://github.com/rtbrick/rtbrick-mcp-server"
-"Bug Tracker" = "https://github.com/rtbrick/rtbrick-mcp-server/issues"
-Changelog     = "https://github.com/rtbrick/rtbrick-mcp-server/blob/main/CHANGELOG.md"
+Documentation = "https://www.rtbrick.com/docs/techdocs/current/index.html"
+Repository    = "https://github.com/rtbrick/rtb-mcp"
+"Bug Tracker" = "https://github.com/rtbrick/rtb-mcp/issues"
+Changelog     = "https://github.com/rtbrick/rtb-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
+rtbrick-mcp-server = "rtbrick_mcp_server.server:main"
 rtb-mcp = "rtbrick_mcp_server.server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["rtbrick_mcp_server*"]
 
-[tool.setuptools.package-data]
-"rtbrick_mcp_server" = ["py.typed"]
-
-# ---------------------------------------------------------------------------
-# Ruff (linter / formatter)
-# ---------------------------------------------------------------------------
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 99
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4"]
+select = ["E", "F", "W", "I", "B", "C4"]
 ignore = ["E501"]
 
-# ---------------------------------------------------------------------------
-# Mypy (type checker)
-# ---------------------------------------------------------------------------
-[tool.mypy]
-python_version = "3.9"
-strict = false
-ignore_missing_imports = true
-
-# ---------------------------------------------------------------------------
-# Pytest
-# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "--tb=short"
